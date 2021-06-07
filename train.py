@@ -45,38 +45,39 @@ def dev(model, dev_data_loader):
     pred_label_all = []
     true_tag_all = []
     pred_tag_all = []
-    for i, batch in enumerate(dev_data_loader, start=1):
-        batch = [d.to(device) for d in batch]
-        input_ids = batch[0]
-        attention_mask = batch[1]
-        token_type_ids = batch[2]
-        true_tags = batch[3]
-        true_labels = batch[4]
-        label_logits, tag_logits = model(input_ids, attention_mask, token_type_ids)
-        loss = criterion(label_logits, tag_logits, true_labels, true_tags)
-        dev_loss += loss.item()
-        num_step += 1
+    with torch.no_grad():
+        for i, batch in enumerate(dev_data_loader, start=1):
+            batch = [d.to(device) for d in batch]
+            input_ids = batch[0]
+            attention_mask = batch[1]
+            token_type_ids = batch[2]
+            true_tags = batch[3]
+            true_labels = batch[4]
+            label_logits, tag_logits = model(input_ids, attention_mask, token_type_ids)
+            loss = criterion(label_logits, tag_logits, true_labels, true_tags)
+            dev_loss += loss.item()
+            num_step += 1
 
-        # 数据转移到cpu
-        true_tags = true_tags.detach().cpu()
-        true_labels = true_labels.detach().cpu()
-        label_logits = label_logits.detach().cpu()
-        tag_logits = tag_logits.detach().cpu()
+            # 数据转移到cpu
+            true_tags = true_tags.detach().cpu()
+            true_labels = true_labels.detach().cpu()
+            label_logits = label_logits.detach().cpu()
+            tag_logits = tag_logits.detach().cpu()
 
-        # 标签
-        label_logits = torch.argmax(label_logits, dim=1)
-        pred_label_all.extend([idx2label[idx.item()] for idx in label_logits])
-        true_label_all.extend([idx2label[idx.item()] for idx in true_labels])
+            # 标签
+            label_logits = torch.argmax(label_logits, dim=1)
+            pred_label_all.extend([idx2label[idx.item()] for idx in label_logits])
+            true_label_all.extend([idx2label[idx.item()] for idx in true_labels])
 
-        # 处理tag
-        tag_logits = tag_logits.view(-1, tag_logits.size(2))
-        true_tags = true_tags.view(-1)
-        tag_logits = torch.argmax(tag_logits, 1)
-        filter_idx = true_tags != pad_idx
-        true_tags = true_tags[filter_idx]
-        tag_logits = tag_logits[filter_idx]
-        true_tag_all.extend([idx2tag[idx.item()] for idx in true_tags])
-        pred_tag_all.extend([idx2tag[idx.item()] for idx in tag_logits])
+            # 处理tag
+            tag_logits = tag_logits.view(-1, tag_logits.size(2))
+            true_tags = true_tags.view(-1)
+            tag_logits = torch.argmax(tag_logits, 1)
+            filter_idx = true_tags != pad_idx
+            true_tags = true_tags[filter_idx]
+            tag_logits = tag_logits[filter_idx]
+            true_tag_all.extend([idx2tag[idx.item()] for idx in true_tags])
+            pred_tag_all.extend([idx2tag[idx.item()] for idx in tag_logits])
 
     loss = dev_loss/num_step
     acc_label, f1_label, table_label, acc_tag, f1_tag, table_tag = \
@@ -113,6 +114,7 @@ def main():
 
     # 优化器
     optimizer = AdamW(model.parameters(), lr=lr)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, 1.0, gamma=0.95)
 
     # 开始训练
     best_dev_f1 = float('-inf')
@@ -179,6 +181,8 @@ def main():
         if f1_tag > best_dev_f1:
             best_dev_f1 = f1_tag
             torch.save(model.state_dict(), config["save_model_path"])
+
+        scheduler.step()
 
     # TEST
     loss, f1_label, acc_label, f1_tag, acc_tag, table_label, table_tag = \
